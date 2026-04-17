@@ -44,6 +44,25 @@ async def send_alert_to_sim_server(machine_id: str, risk: float, message: str, r
     except Exception as exc:
         print(f"Failed to post alert to simulation server: {exc}")
 
+async def schedule_maintenance(machine_id: str):
+    """Automatically book a repair slot on the simulation server (Bonus Feature)."""
+    url = f"{SIM_SERVER_URL}/schedule-maintenance"
+    payload = {"machine_id": machine_id}
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload) as resp:
+                if resp.status in (200, 201):
+                    data = await resp.json()
+                    booking = data.get("booking", {})
+                    print(f"🔧 [AUTO-BOOK] Maintenance scheduled for {machine_id}. Slot: {booking.get('slot')}")
+                    return booking.get("slot")
+                else:
+                    print(f"Failed to schedule maintenance: HTTP {resp.status}")
+    except Exception as exc:
+        print(f"Maintenance scheduling error: {exc}")
+    return None
+
 async def agent_loop():
     telemetry_repo = TelemetryRepository(DATABASE_URL)
     telemetry_repo.initialize()
@@ -162,6 +181,9 @@ async def agent_loop():
                             detailed_explanation = explain_alert(alert.machine_id, alert.risk, alert.details, detailed=True)
                             broadcast_voice_alert(f"Emergency alert for machine {alert.machine_id}. {detailed_explanation}")
                             
+                            # Bonus: Auto-book maintenance slot
+                            await schedule_maintenance(alert.machine_id)
+
                             last_voice_call_time[alert.machine_id] = current_time
                             last_global_voice_call_time = current_time
                             print(f"📞 IMMEDIATE voice alert triggered for {alert.machine_id}.")
