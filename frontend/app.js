@@ -332,7 +332,10 @@ function setupEventListeners() {
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const viewId = btn.dataset.view;
+            const modalId = btn.dataset.modal;
             if (viewId) switchView(viewId);
+            if (modalId === 'schedule') openScheduleModal();
+            if (modalId === 'calendar-view') openCalendarViewModal();
         });
     });
 
@@ -2110,4 +2113,569 @@ async function startMaintenancePolling() {
 setInterval(startMaintenancePolling, 5000);
 startMaintenancePolling();
 
+const SCHEDULE_API_URL = '/api/maintenance';
+
+function openScheduleModal() {
+    const modal = document.getElementById('schedule-modal');
+    if (!modal) return;
+
+    const statusContainer = document.getElementById('device-status-summary');
+    if (statusContainer) {
+        statusContainer.innerHTML = '';
+        machines.forEach(m => {
+            const data = machineData[m];
+            const risk = data ? data.risk : 0;
+            let statusClass = 'bg-primary-container/30 text-primary-container';
+            let statusText = 'STABLE';
+            if (risk >= 0.8) {
+                statusClass = 'bg-error/30 text-error';
+                statusText = 'CRITICAL';
+            } else if (risk >= 0.6) {
+                statusClass = 'bg-warning/30 text-warning';
+                statusText = 'WARNING';
+            }
+
+            const div = document.createElement('div');
+            div.className = `p-2 text-[10px] font-mono ${statusClass}`;
+            div.innerHTML = `<div class="font-bold">${m}</div><div>${statusText} (${risk.toFixed(2)})</div>`;
+            statusContainer.appendChild(div);
+        });
+    }
+
+    const deviceSelect = document.getElementById('schedule-device-select');
+    if (deviceSelect) {
+        deviceSelect.innerHTML = '<option value="">Select a device</option>';
+        machines.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.innerText = m;
+            deviceSelect.appendChild(opt);
+        });
+    }
+
+    const dateInput = document.getElementById('schedule-date-input');
+    if (dateInput) {
+        dateInput.value = new Date().toISOString().split('T')[0];
+    }
+
+    modal.classList.remove('hidden');
+}
+
+function closeScheduleModal() {
+    const modal = document.getElementById('schedule-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function submitSchedule() {
+    const deviceSelect = document.getElementById('schedule-device-select');
+    const dateInput = document.getElementById('schedule-date-input');
+    const timeInput = document.getElementById('schedule-time-input');
+    const typeInput = document.getElementById('schedule-type-input');
+    const notesInput = document.getElementById('schedule-notes-input');
+
+    const machineId = deviceSelect ? deviceSelect.value : '';
+    const scheduledDate = dateInput ? dateInput.value : '';
+    const scheduledTime = timeInput ? timeInput.value : '09:00';
+    const maintenanceType = typeInput ? typeInput.value : 'scheduled';
+    const notes = notesInput ? notesInput.value : '';
+
+    if (!machineId) { alert('Please select a device'); return; }
+    if (!scheduledDate) { alert('Please select a date'); return; }
+
+    try {
+        const scheduledIso = `${scheduledDate}T${scheduledTime}:00`;
+
+        // Primary route: maintenance API (available in some workspace variants)
+        let response = await fetch(`${SCHEDULE_API_URL}/schedule`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                machine_id: machineId,
+                scheduled_date: scheduledIso,
+                maintenance_type: maintenanceType,
+                notes: notes,
+            }),
+        });
+
+        // Fallback route: simulation server booking endpoint used by this root setup
+        if (!response.ok) {
+            response = await fetch('http://localhost:3000/schedule-maintenance', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    machine_id: machineId,
+                    proposed_slot: scheduledIso,
+                }),
+            });
+        }
+
+        if (response.ok) {
+            closeScheduleModal();
+            alert('Schedule set successfully!');
+        } else {
+            alert('Failed to set schedule');
+        }
+    } catch (err) {
+        console.error('Schedule error:', err);
+        alert('Failed to set schedule. Ensure backend is running.');
+    }
+}
+
+let calendarViewMonth = new Date().getMonth();
+let calendarViewYear = new Date().getFullYear();
+let scheduledMaintenanceData = [];
+
+async function loadScheduledMaintenance() {
+    try {
+        const response = await fetch(`${SCHEDULE_API_URL}/schedule?days_ahead=60`);
+        if (response.ok) {
+            const data = await response.json();
+            scheduledMaintenanceData = data.schedule || [];
+        }
+    } catch (err) {
+        console.warn('Cannot load maintenance schedule:', err);
+        scheduledMaintenanceData = [];
+    }
+}
+
+function openCalendarViewModal() {
+    const modal = document.getElementById('calendar-view-modal');
+    if (!modal) return;
+
+    loadScheduledMaintenance().then(() => {
+        renderCalendarView();
+        renderUpcomingSchedules();
+    });
+
+    modal.classList.remove('hidden');
+}
+
+function closeCalendarViewModal() {
+    const modal = document.getElementById('calendar-view-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function renderCalendarView() {
+    const grid = document.getElementById('calendar-view-grid');
+    const monthLabel = document.getElementById('cal-view-month');
+    if (!grid || !monthLabel) return;
+
+    const monthNames = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+    monthLabel.innerText = `${monthNames[calendarViewMonth]} ${calendarViewYear}`;
+    grid.innerHTML = '';
+
+    const firstDay = new Date(calendarViewYear, calendarViewMonth, 1).getDay();
+    const daysInMonth = new Date(calendarViewYear, calendarViewMonth + 1, 0).getDate();
+
+    for (let i = 0; i < firstDay; i++) {
+        const empty = document.createElement('div');
+        grid.appendChild(empty);
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+        const cell = document.createElement('div');
+        const dateStr = `${calendarViewYear}-${String(calendarViewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+        const daySchedules = scheduledMaintenanceData.filter(m => m.scheduled_date && m.scheduled_date.startsWith(dateStr));
+
+        let bgClass = 'bg-surface-container-highest/20 hover:bg-surface-container-high cursor-pointer text-on-surface-variant';
+        if (daySchedules.length > 0) {
+            const types = [...new Set(daySchedules.map(s => s.maintenance_type))];
+            if (types.includes('emergency')) bgClass = 'bg-error/30 text-error border border-error/50';
+            else if (types.includes('inspection')) bgClass = 'bg-tertiary/30 text-tertiary border border-tertiary/50';
+            else bgClass = 'bg-primary-container/30 text-primary-container border border-primary-container/50';
+        }
+
+        const today = new Date();
+        const isToday = today.getDate() === day && today.getMonth() === calendarViewMonth && today.getFullYear() === calendarViewYear;
+
+        cell.className = `text-[10px] font-mono p-2 text-center ${bgClass} ${isToday ? 'ring-1 ring-primary-container' : ''}`;
+        cell.innerHTML = `<div>${day}</div>${daySchedules.length > 0 ? `<div class="text-[8px]">${daySchedules.length}</div>` : ''}`;
+        grid.appendChild(cell);
+    }
+}
+
+function renderUpcomingSchedules() {
+    const container = document.getElementById('upcoming-schedules');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    const upcoming = scheduledMaintenanceData
+        .filter(m => m.status === 'scheduled')
+        .sort((a, b) => new Date(a.scheduled_date) - new Date(b.scheduled_date))
+        .slice(0, 5);
+
+    if (upcoming.length === 0) {
+        container.innerHTML = '<div class="text-[10px] text-outline">No scheduled maintenance</div>';
+        return;
+    }
+
+    upcoming.forEach(s => {
+        const date = new Date(s.scheduled_date);
+        const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+        let typeClass = 'bg-primary-container/30 text-primary-container';
+        if (s.maintenance_type === 'emergency') typeClass = 'bg-error/30 text-error';
+        else if (s.maintenance_type === 'inspection') typeClass = 'bg-tertiary/30 text-tertiary';
+
+        const div = document.createElement('div');
+        div.className = `p-2 text-[10px] font-mono flex justify-between items-center ${typeClass}`;
+        div.innerHTML = `<span>${s.machine_id}</span><span>${dateStr}</span>`;
+        container.appendChild(div);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const calViewPrev = document.getElementById('cal-view-prev');
+    const calViewNext = document.getElementById('cal-view-next');
+
+    if (calViewPrev) {
+        calViewPrev.onclick = () => {
+            calendarViewMonth--;
+            if (calendarViewMonth < 0) { calendarViewMonth = 11; calendarViewYear--; }
+            renderCalendarView();
+        };
+    }
+
+    if (calViewNext) {
+        calViewNext.onclick = () => {
+            calendarViewMonth++;
+            if (calendarViewMonth > 11) { calendarViewMonth = 0; calendarViewYear++; }
+            renderCalendarView();
+        };
+    }
+});
+
 init();
+
+/**
+ * SENTI CHATBOT - Independent AI Assistant Module
+ * Completely isolated from main application logic
+ * Provides information and answers about SENTINEL 4 features
+ */
+
+const SENTI_KNOWLEDGE_BASE = {
+    'overview|dashboard|features|what can i do': {
+        response: 'SENTINEL 4 is a comprehensive Mission Control system that monitors industrial machinery in real-time. Key features include:\n\n• OVERVIEW: Real-time machine status and health monitoring\n• DIAGNOSTICS: Deep forensic analysis with AI-powered insights\n• MAINTENANCE: Service schedules and risk assessment\n• ANALYSE: Historical data analysis across machines\n• HISTORY: Track machine data over time\n• SCHEDULE: Manage maintenance schedules\n• CALENDAR: View upcoming events and maintenance windows'
+    },
+    'overview|dashboard': {
+        response: 'The OVERVIEW dashboard displays real-time status of all machines. Features include:\n\n• HEALTH_RISK_MATRIX: Visual heat map of sensor health\n• INCIDENT_STREAM: Live alert feed for critical issues\n• MACHINE_CARDS: Individual machine status and metrics\n• REPORT_GENERATOR: Export data as PDF reports'
+    },
+    'diagnostics': {
+        response: 'DIAGNOSTICS provides deep-dive forensic analysis. Features:\n\n• Select a machine from the overview to analyze\n• AI_LOGIC_CHAIN: AI-generated analysis narrative\n• TELEMETRY_FORENSICS: Multi-channel sensor data charts\n• Real-time temperature, vibration, RPM, and load monitoring\n• Case reference tracking for forensic investigation'
+    },
+    'maintenance': {
+        response: 'MAINTENANCE tracks equipment service and risk. Includes:\n\n• SERVICE_MATRIX: Table of all equipment with risk values\n• MAINTENANCE_SCHEDULE: Upcoming maintenance windows\n• Risk assessment and status tracking\n• Last event timestamp for each unit'
+    },
+    'analysis|analyse|analyze': {
+        response: 'ANALYSE provides comprehensive historical data analysis:\n\n• Scope: Filter by all machines or specific units\n• Metric Selection: Choose temperature, vibration, RPM, or current\n• Time Range: Define start and end dates for analysis\n• Sorting Options: Organize data by various parameters\n• Visual Graphs: Interactive charts of historical trends\n• Export: Download analysis results as CSV or JSON'
+    },
+    'history': {
+        response: 'HISTORY tracks machine data snapshots over time:\n\n• Minute-level data recording\n• Save current machine data manually\n• Export in CSV, JSON, or PDF formats\n• View historical details by selecting records\n• Filter by machine and time period\n• Real-time history updates'
+    },
+    'schedule': {
+        response: 'SCHEDULE feature helps manage maintenance windows:\n\n• View upcoming maintenance appointments\n• Book maintenance slots for equipment\n• Track booked appointments with timestamps\n• Coordinate service activities\n• Refer to event booking system'
+    },
+    'calendar': {
+        response: 'CALENDAR provides visual event management:\n\n• Monthly view of maintenance activities\n• See upcoming scheduled events\n• Plan maintenance windows\n• Coordinate with scheduling system\n• Track important dates'
+    },
+    'alerts|incident|warning|error': {
+        response: 'Alerts inform you of critical issues:\n\n• CRITICAL: Red status (risk > 0.8) requires immediate action\n• WARNING: Yellow status (risk 0.6-0.8) needs attention\n• NORMAL: Green status indicates healthy operation\n• Live feed shows recent incidents\n• Click alerts for detailed information'
+    },
+    'temperature|temp': {
+        response: 'Temperature Monitoring:\n\n• Measured in Celsius (°C)\n• Thresholds vary by machine type\n• Critical when exceeding safe limits\n• Monitor in DIAGNOSTICS for real-time trends\n• Historical data available in HISTORY and ANALYSE'
+    },
+    'vibration|vib': {
+        response: 'Vibration Monitoring:\n\n• Measured in mm/s (millimeters per second)\n• Indicates mechanical issues\n• Higher values suggest wear or misalignment\n• Key indicator in HEALTH_RISK_MATRIX\n• Critical for bearing and motor health'
+    },
+    'rpm|speed': {
+        response: 'RPM (Rotations Per Minute):\n\n• Measures machine speed\n• Critical for motor and spindle monitoring\n• Deviations indicate mechanical problems\n• Tracked across all rotating equipment\n• Historical trends available in ANALYSE'
+    },
+    'load|current': {
+        response: 'Electrical Load / Current:\n\n• Measured in Amperes (A)\n• Indicates equipment power consumption\n• Rising current suggests mechanical stress\n• Used for motor health assessment\n• Part of multi-channel diagnostics'
+    },
+    'machines|cnc|pump|conveyor': {
+        response: 'Monitored Equipment:\n\n• CNC_01: Computer Numerical Control machine #1\n• CNC_02: Computer Numerical Control machine #2\n• PUMP_03: Hydraulic/fluid pump system\n• CONVEYOR_04: Material conveyor system\n\nEach has independent sensor monitoring and risk assessment.'
+    },
+    'pdf|report|export': {
+        response: 'PDF Report Generation:\n\n• Access from OVERVIEW dashboard\n• Report types:\n  - SUMMARY: Overall system health overview\n  - INCIDENT: Detailed alert and issue reports\n  - MAINTENANCE: Service and schedule reports\n• Click EXPORT_PDF_REPORT to generate\n• Ready status confirms generation complete'
+    },
+    'ai|artificial intelligence': {
+        response: 'AI Features in SENTINEL 4:\n\n• AI_LOGIC_CHAIN: Automated anomaly analysis\n• Generates narrative explanations for issues\n• AI_UNIT_9: Advanced diagnostics engine\n• Processes multi-channel sensor data\n• Provides risk assessment and predictions\n• Explains root causes of anomalies'
+    },
+    'help|how to|tutorial|guide': {
+        response: 'Getting Started with SENTINEL 4:\n\n1. Start at OVERVIEW dashboard\n2. Monitor real-time machine health\n3. Click machine cards for details\n4. Use DIAGNOSTICS for deep analysis\n5. Check MAINTENANCE for service needs\n6. View ANALYSE for trends\n7. Track data in HISTORY\n8. Schedule maintenance in SCHEDULE\n9. View calendar in CALENDAR\n\nAsk me about specific features!'
+    },
+    'heatmap|health|risk|matrix': {
+        response: 'HEALTH_RISK_MATRIX displays machine health status:\n\n• Grid-based visual representation\n• Rows: Sensors (Temperature, Vibration, RPM, Load)\n• Columns: Machines (CNC1, CNC2, PUMP, CONV)\n• Color coding:\n  - Red: Critical condition\n  - Yellow: Warning condition\n  - Green: Normal operation\n• Real-time updates every data refresh'
+    },
+    'mobile|responsive|phone|tablet': {
+        response: 'Mobile Features:\n\n• Bottom navigation bar on mobile devices\n• Responsive design for smaller screens\n• Access all views on mobile\n• Touch-friendly interface\n• Optimized for on-the-go monitoring'
+    },
+    'color|colors|theme|dark|light': {
+        response: 'Design System:\n\n• Primary Color: Gold (#FFD700) - Main highlights\n• Secondary: Soft Red (#ffb3ae) - Alerts\n• Tertiary: Cyan (#72ebff) - Information\n• Error: Red (#FF4C4C) - Critical issues\n• Dark theme optimized for industrial environments\n• Blueprint grid background for tactical feel'
+    }
+};
+
+const sentiState = {
+    isOpen: false,
+    conversationHistory: []
+};
+
+const SENTI_PREDICTION_KEYWORDS = [
+    'predict',
+    'prediction',
+    'future',
+    'fault',
+    'failure',
+    'breakdown',
+    'chance',
+    'probability',
+    'percent',
+    'percentage',
+    'recommend',
+    'solution',
+    'prevent',
+    'next issue'
+];
+
+function clampPercent(value) {
+    return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function average(values) {
+    if (!values || values.length === 0) return 0;
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function normalizedTrendScore(series, direction = 'up') {
+    if (!Array.isArray(series) || series.length < 10) return 0;
+    const recent = series.slice(-5);
+    const previous = series.slice(-10, -5);
+    const prevAvg = average(previous);
+    if (!Number.isFinite(prevAvg) || Math.abs(prevAvg) < 0.0001) return 0;
+    const recentAvg = average(recent);
+    const deltaRatio = (recentAvg - prevAvg) / Math.abs(prevAvg);
+    const directional = direction === 'down' ? -deltaRatio : deltaRatio;
+    return Math.max(0, directional);
+}
+
+function inferFaultType(scores) {
+    const entries = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+    return entries.length ? entries[0][0] : 'general wear progression';
+}
+
+function recommendationForFault(faultType) {
+    switch (faultType) {
+        case 'bearing wear':
+            return 'Run vibration inspection, verify bearing lubrication, and schedule controlled downtime within 24 hours.';
+        case 'thermal overload':
+            return 'Reduce load, inspect cooling airflow, and check thermal thresholds and fan function immediately.';
+        case 'motor stress':
+            return 'Inspect drive current and belt/coupling resistance, then plan maintenance before next production cycle.';
+        case 'rotational imbalance':
+            return 'Perform alignment and balancing checks; monitor RPM stability for the next 30-60 minutes.';
+        default:
+            return 'Increase monitoring frequency and schedule preventive inspection to avoid unplanned downtime.';
+    }
+}
+
+function evaluateMachinePrediction(machineId) {
+    const machine = machineData[machineId];
+    const history = machineHistory[machineId];
+    const baseline = baseValues[machineId];
+
+    if (!machine || !history || !baseline) {
+        return null;
+    }
+
+    const metrics = machine.metrics || {};
+    const riskBase = clampPercent((Number(machine.risk) || 0) * 100);
+
+    const temp = Number(metrics.temperature_C) || baseline.temperature_C;
+    const vib = Number(metrics.vibration_mm_s) || baseline.vibration_mm_s;
+    const rpm = Number(metrics.rpm) || baseline.rpm;
+    const load = Number(metrics.current_A) || baseline.current_A;
+
+    const tempDrift = Math.max(0, ((temp - baseline.temperature_C) / Math.max(1, baseline.temperature_C)) * 100);
+    const vibDrift = Math.max(0, ((vib - baseline.vibration_mm_s) / Math.max(0.1, baseline.vibration_mm_s)) * 100);
+    const rpmDrop = Math.max(0, ((baseline.rpm - rpm) / Math.max(1, baseline.rpm)) * 100);
+    const loadDrift = Math.max(0, ((load - baseline.current_A) / Math.max(0.1, baseline.current_A)) * 100);
+
+    const tempTrend = normalizedTrendScore(history.temp, 'up');
+    const vibTrend = normalizedTrendScore(history.vib, 'up');
+    const rpmTrendDown = normalizedTrendScore(history.rpm, 'down');
+    const loadTrend = normalizedTrendScore(history.load, 'up');
+
+    const trendContribution = clampPercent((tempTrend * 18) + (vibTrend * 24) + (rpmTrendDown * 14) + (loadTrend * 16));
+    const driftContribution = clampPercent((tempDrift * 0.35) + (vibDrift * 0.45) + (rpmDrop * 0.25) + (loadDrift * 0.4));
+
+    const predictedFaultRisk = clampPercent((riskBase * 0.6) + (driftContribution * 0.25) + (trendContribution * 0.15));
+
+    const faultScores = {
+        'bearing wear': (vibDrift * 0.7) + (vibTrend * 40) + (tempTrend * 20),
+        'thermal overload': (tempDrift * 0.8) + (loadDrift * 0.5) + (tempTrend * 35),
+        'motor stress': (loadDrift * 0.7) + (rpmDrop * 0.6) + (rpmTrendDown * 30),
+        'rotational imbalance': (vibDrift * 0.55) + (rpmDrop * 0.4) + (vibTrend * 25)
+    };
+
+    const likelyFault = inferFaultType(faultScores);
+    const recommendation = recommendationForFault(likelyFault);
+
+    return {
+        machineId,
+        predictedFaultRisk,
+        likelyFault,
+        recommendation,
+        riskNow: riskBase
+    };
+}
+
+function parseRequestedMachine(userInputLower) {
+    return machines.find((machineId) => {
+        const lower = machineId.toLowerCase();
+        const compact = lower.replace(/_/g, '');
+        return userInputLower.includes(lower) || userInputLower.includes(compact);
+    }) || null;
+}
+
+function hasPredictionIntent(userInputLower) {
+    return SENTI_PREDICTION_KEYWORDS.some((keyword) => userInputLower.includes(keyword));
+}
+
+function buildPredictionResponse(userInputLower) {
+    const requestedMachine = parseRequestedMachine(userInputLower);
+    const targets = requestedMachine ? [requestedMachine] : [...machines];
+    const predictions = targets
+        .map((machineId) => evaluateMachinePrediction(machineId))
+        .filter(Boolean)
+        .sort((a, b) => b.predictedFaultRisk - a.predictedFaultRisk);
+
+    if (!predictions.length) {
+        return 'I need live telemetry first. Wait for machine data to stream in, then ask me for a prediction again.';
+    }
+
+    if (requestedMachine) {
+        const p = predictions[0];
+        return `PREDICTIVE_FAULT_FORECAST (${p.machineId})\n\n• Current Risk: ${p.riskNow}%\n• Predicted Future Fault Probability: ${p.predictedFaultRisk}%\n• Most Likely Fault: ${p.likelyFault.toUpperCase()}\n• Recommended Action: ${p.recommendation}`;
+    }
+
+    const top = predictions.slice(0, 3)
+        .map((p, index) => `${index + 1}. ${p.machineId}: ${p.predictedFaultRisk}% (${p.likelyFault})`)
+        .join('\n');
+
+    const highest = predictions[0];
+    return `PREDICTIVE_FAULT_FORECAST (ALL MACHINES)\n\nTop Future Fault Risks:\n${top}\n\nPriority Recommendation for ${highest.machineId}: ${highest.recommendation}\n\nTip: Ask "predict ${highest.machineId}" for detailed breakdown.`;
+}
+
+function initSenti() {
+    const toggleBtn = document.getElementById('senti-toggle-btn');
+    const closeBtn = document.getElementById('senti-close-btn');
+    const sendBtn = document.getElementById('senti-send-btn');
+    const input = document.getElementById('senti-input');
+    const window = document.getElementById('senti-window');
+
+    if (!toggleBtn || !closeBtn || !sendBtn || !input || !window) return;
+
+    toggleBtn.addEventListener('click', () => {
+        sentiState.isOpen = !sentiState.isOpen;
+        window.classList.toggle('hidden', !sentiState.isOpen);
+        if (sentiState.isOpen) {
+            input.focus();
+        }
+    });
+
+    closeBtn.addEventListener('click', () => {
+        sentiState.isOpen = false;
+        window.classList.add('hidden');
+    });
+
+    sendBtn.addEventListener('click', () => {
+        sendSentiMessage();
+    });
+
+    input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendSentiMessage();
+        }
+    });
+}
+
+function sendSentiMessage() {
+    const input = document.getElementById('senti-input');
+    const messagesContainer = document.getElementById('senti-messages');
+    const message = input.value.trim();
+
+    if (!message) return;
+
+    // Add user message
+    addSentiMessage(message, 'user');
+    input.value = '';
+
+    // Generate AI response
+    const response = generateSentiResponse(message);
+    
+    // Simulate typing delay for natural feel
+    setTimeout(() => {
+        addSentiMessage(response, 'bot');
+        // Auto-scroll to bottom
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }, 300);
+}
+
+function addSentiMessage(text, sender) {
+    const messagesContainer = document.getElementById('senti-messages');
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `senti-message senti-${sender}-message`;
+    
+    const textSpan = document.createElement('span');
+    textSpan.className = 'senti-message-text';
+    textSpan.textContent = text;
+    
+    messageDiv.appendChild(textSpan);
+    messagesContainer.appendChild(messageDiv);
+    
+    sentiState.conversationHistory.push({
+        sender,
+        text,
+        timestamp: new Date()
+    });
+
+    // Scroll to bottom
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+function generateSentiResponse(userInput) {
+    const input = userInput.toLowerCase().trim();
+
+    if (hasPredictionIntent(input)) {
+        return buildPredictionResponse(input);
+    }
+    
+    // Try exact matches first
+    for (const [keywords, data] of Object.entries(SENTI_KNOWLEDGE_BASE)) {
+        const keywordArray = keywords.split('|');
+        if (keywordArray.some(keyword => input.includes(keyword))) {
+            return data.response;
+        }
+    }
+
+    // Fallback responses
+    const fallbacks = [
+        'I\'m not sure about that. Try asking me about OVERVIEW, DIAGNOSTICS, MAINTENANCE, ANALYSE, HISTORY, SCHEDULE, or CALENDAR features.',
+        'That\'s an interesting question! Ask me about specific features like alerts, machines, monitoring, or data analysis.',
+        'I specialize in SENTINEL 4 information. Ask me about any feature or how to use the system!',
+        'Let me help! Ask about machine monitoring, diagnostics, maintenance scheduling, or data analysis.'
+    ];
+
+    return fallbacks[Math.floor(Math.random() * fallbacks.length)];
+}
+
+// Initialize Senti when document is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initSenti);
+} else {
+    initSenti();
+}
