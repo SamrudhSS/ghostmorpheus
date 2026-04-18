@@ -1,0 +1,11 @@
+{
+  "buildCommand": "",
+  "outputDirectory": "frontend",
+  "framework": "static",
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ]
+}

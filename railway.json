@@ -1,0 +1,12 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "deploy": {
+    "startCommand": "python main.py",
+    "restartPolicyMaxRetries": 3
+  },
+  "plugins": ["postgresql"],
+  "variables": {
+    "HISTORY_API_HOST": "0.0.0.0",
+    "HISTORY_API_PORT": "8010"
+  }
+}
