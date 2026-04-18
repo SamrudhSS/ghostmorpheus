@@ -1,4 +1,3 @@
-from twilio.rest import Client
 from config import TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, TWILIO_TO_NUMBER
 
 def broadcast_voice_alert(message: str):
@@ -10,6 +9,9 @@ def broadcast_voice_alert(message: str):
         return
 
     try:
+        # Import lazily so missing Twilio does not crash app startup.
+        from twilio.rest import Client
+
         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
         
         # We use TwiML to define what the voice says
@@ -21,5 +23,7 @@ def broadcast_voice_alert(message: str):
             from_=TWILIO_FROM_NUMBER
         )
         print(f"📞 Voice alert initiated! Call SID: {call.sid}")
+    except ModuleNotFoundError:
+        print("⚠️ Twilio package not installed. Install 'twilio' to enable voice alerts.")
     except Exception as e:
         print(f"❌ Failed to initiate voice alert: {e}")
