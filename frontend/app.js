@@ -2078,32 +2078,40 @@ async function startMaintenancePolling() {
     try {
         const res = await fetch('http://localhost:3000/maintenances');
         const data = await res.json();
-        const feed = document.getElementById('maintenance-schedule-feed');
         
-        if (!feed) return;
-
+        // Target BOTH the overview sidebar and the maintenance view feeds
+        const feedOverview = document.getElementById('maintenance-schedule-feed-overview');
+        const feedMain = document.getElementById('maintenance-schedule-feed');
+        
         const bookings = data.maintenances || [];
         
-        if (bookings.length === 0) {
-            feed.innerHTML = '<div class="text-[10px] font-mono text-outline uppercase p-4 text-center">No repairs scheduled.</div>';
-        } else {
-            feed.innerHTML = [...bookings].reverse().map(b => {
-                const slotDate = new Date(b.slot);
-                return `
-                    <div class="relative pl-6 border-l border-primary-container/30 pb-4 mb-2 group">
-                        <div class="absolute -left-1 top-1 w-2 h-2 rounded-full bg-primary-container shadow-[0_0_8px_#ffd700]"></div>
-                        <div class="flex justify-between items-start">
-                            <div>
-                                <p class="text-[8px] font-mono text-outline mb-1 uppercase">BOOKED: ${new Date(b.booked_at).toLocaleTimeString()}</p>
-                                <p class="text-[10px] font-bold text-on-surface uppercase">${b.machine_id} REPAIR</p>
-                                <p class="text-[9px] text-primary-container font-medium mt-1">SLOT: ${slotDate.toLocaleDateString()} @ ${slotDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+        const renderFeed = (container) => {
+            if (!container) return;
+            if (bookings.length === 0) {
+                container.innerHTML = '<div class="text-[10px] font-mono text-outline uppercase p-4 text-center">No repairs scheduled.</div>';
+            } else {
+                container.innerHTML = [...bookings].reverse().map(b => {
+                    const slotDate = new Date(b.slot);
+                    return `
+                        <div class="relative pl-6 border-l border-primary-container/30 pb-4 mb-2 group">
+                            <div class="absolute -left-1 top-1 w-2 h-2 rounded-full bg-primary-container shadow-[0_0_8px_#ffd700]"></div>
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <p class="text-[8px] font-mono text-outline mb-1 uppercase">BOOKED: ${new Date(b.booked_at).toLocaleTimeString()}</p>
+                                    <p class="text-[10px] font-bold text-on-surface uppercase">${b.machine_id} REPAIR</p>
+                                    <p class="text-[9px] text-primary-container font-medium mt-1">SLOT: ${slotDate.toLocaleDateString()} @ ${slotDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                                </div>
+                                <span class="text-[7px] font-mono bg-surface-container-highest px-1 py-0.5 text-outline uppercase">${b.id}</span>
                             </div>
-                            <span class="text-[7px] font-mono bg-surface-container-highest px-1 py-0.5 text-outline uppercase">${b.id}</span>
                         </div>
-                    </div>
-                `;
-            }).join("");
-        }
+                    `;
+                }).join("");
+            }
+        };
+
+        renderFeed(feedOverview);
+        renderFeed(feedMain);
+
     } catch (err) {
         console.warn('Maintenance polling failed.');
     }
