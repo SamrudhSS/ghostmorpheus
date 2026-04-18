@@ -3,6 +3,15 @@
  * Unified Data Binding & Real-Time Simulation Integration
  */
 
+// Configuration for API endpoints
+// These can be overridden via window variables for deployment
+const API_CONFIG = {
+    // Simulation Server URL (Node.js service)
+    SIM_SERVER_URL: window.SIM_SERVER_URL || localStorage.getItem('sim_server_url') || 'http://localhost:3000',
+    // History & Python Backend API URL (Python service)
+    HISTORY_API_URL: window.HISTORY_API_URL || localStorage.getItem('history_api_url') || '/api/history'
+};
+
 const machines = ['CNC_01', 'CNC_02', 'PUMP_03', 'CONVEYOR_04'];
 const sensorKeys = ['temperature_C', 'vibration_mm_s', 'rpm', 'current_A'];
 
@@ -34,7 +43,6 @@ const analysisState = {
     endTime: '',
     sortDirection: 'desc'
 };
-const HISTORY_API_URL = '/api/history';
 const historySidebarState = {
     records: [],
     selectedRecordId: null,
@@ -203,7 +211,7 @@ function openStreamForMachine(mId) {
     }
 
     try {
-        const es = new EventSource(`http://localhost:3000/stream/${mId}`);
+        const es = new EventSource(`${API_CONFIG.SIM_SERVER_URL}/stream/${mId}`);
         es.onmessage = (e) => {
             const reading = JSON.parse(e.data);
             updateMachineData(mId, reading);
@@ -573,7 +581,7 @@ function getSelectedDispatchMachine() {
 
 async function logHistoryOperationEvent(machineId, eventType, status, severity, message, details = {}) {
     try {
-        await fetch(`${HISTORY_API_URL}/events`, {
+        await fetch(`${API_CONFIG.HISTORY_API_URL}/events`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1018,7 +1026,7 @@ async function loadHistorySidebar() {
     renderHistorySidebar();
 
     try {
-        const response = await fetch(`${HISTORY_API_URL}?${params.toString()}`);
+        const response = await fetch(`${API_CONFIG.HISTORY_API_URL}?${params.toString()}`);
         if (!response.ok) throw new Error(`History request failed (${response.status})`);
         const payload = await response.json();
         historySidebarState.records = Array.isArray(payload.records) ? payload.records : [];
@@ -1057,7 +1065,7 @@ async function saveCurrentMachineSnapshot() {
     };
 
     try {
-        const response = await fetch(`${HISTORY_API_URL}/snapshot`, {
+        const response = await fetch(`${API_CONFIG.HISTORY_API_URL}/snapshot`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -1078,7 +1086,7 @@ async function deleteSingleHistoryRecord(readingId, recordType = 'telemetry') {
     if (!ok) return;
 
     try {
-        const response = await fetch(`${HISTORY_API_URL}/${recordType}/${readingId}`, { method: 'DELETE' });
+        const response = await fetch(`${API_CONFIG.HISTORY_API_URL}/${recordType}/${readingId}`, { method: 'DELETE' });
         if (!response.ok) throw new Error(`Delete failed (${response.status})`);
         await loadHistorySidebar();
     } catch (error) {
@@ -1105,7 +1113,7 @@ async function deleteFilteredHistoryRecords() {
     if (endIso) params.set('end', endIso);
 
     try {
-        const response = await fetch(`${HISTORY_API_URL}?${params.toString()}`, { method: 'DELETE' });
+        const response = await fetch(`${API_CONFIG.HISTORY_API_URL}?${params.toString()}`, { method: 'DELETE' });
         if (!response.ok) throw new Error(`Delete failed (${response.status})`);
         await loadHistorySidebar();
     } catch (error) {
@@ -2016,7 +2024,7 @@ function renderMaintenance() {
 let polledAlertIds = new Set();
 async function startAlertPolling() {
     try {
-        const res = await fetch('http://localhost:3000/alerts');
+        const res = await fetch(`${API_CONFIG.SIM_SERVER_URL}/alerts`);
         const data = await res.json();
         
         const simAlerts = data.alerts || [];
@@ -2076,7 +2084,7 @@ startAlertPolling();
 let processedMaintIds = new Set();
 async function startMaintenancePolling() {
     try {
-        const res = await fetch('http://localhost:3000/maintenances');
+        const res = await fetch(`${API_CONFIG.SIM_SERVER_URL}/maintenances`);
         const data = await res.json();
         
         // Target BOTH the overview sidebar and the maintenance view feeds

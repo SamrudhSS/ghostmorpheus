@@ -755,6 +755,25 @@
         </div>
     </div>
 
+    <!-- Configuration for deployed environments -->
+    <script>
+      // These environment variables are injected by Vercel/Netlify
+      // Falls back to localStorage or defaults if not available
+      window.HISTORY_API_URL = window.HISTORY_API_URL || 
+                               (typeof process !== 'undefined' && process.env?.REACT_APP_HISTORY_API_URL) ||
+                               localStorage.getItem('history_api_url') ||
+                               '/api/history';
+      window.SIM_SERVER_URL = window.SIM_SERVER_URL ||
+                              (typeof process !== 'undefined' && process.env?.REACT_APP_SIM_SERVER_URL) ||
+                              localStorage.getItem('sim_server_url') ||
+                              'http://localhost:3000';
+      
+      console.log('API Configuration loaded:', {
+        HISTORY_API_URL: window.HISTORY_API_URL,
+        SIM_SERVER_URL: window.SIM_SERVER_URL
+      });
+    </script>
+
     <script src="app.js"></script>
 </body>
 </html>

@@ -7,3 +7,27 @@ stitch_sentinel_4_industrial_ai_monitoring/
 stitch_sentinel_4_industrial_ai_monitoring.zip
 frontend/stitch_sentinel_4_industrial_ai_monitoring/
 frontend/*.zip
+
+# Node modules
+node_modules/
+malendau-hackathon/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database
+*.db
+*.sqlite
+data/sentinel4*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.DS_Store
+
